@@ -4,13 +4,14 @@ import block
 import noise
 import math
 import net
+
 pygame.init()
 
 # hold control for debug menu
 VERSION = 'Alpha 6'
 size = 20
 creative = True
-username = 'test1'
+username = 'ExampleUserLol'
 
 gen = noise.generator(10)
 world = noise.world(gen)
@@ -21,13 +22,18 @@ py = 0.
 pxv = 0.  # player velocity
 pyv = 0.
 
+fly = False  # velocity toggle
+flyIgnoreWalls = False
+
 pf = False  # player not on the ground
 ps = 'grass'  # player block selection
 
 pi = {}  # player inventory
+keepInv = False  # keep inventory
+
 for b in blocks:
     if blocks[b]['solid']:
-        pi[b] = 0 * creative
+        pi[b] = 99 * creative
 
 debug = {
     'chunk_border': False,
@@ -38,6 +44,7 @@ debug = {
     'fast_physics': False,
     'prompt': False  # cannot start out True
 }
+
 prompt_text = ''
 prompt_history = []
 
@@ -48,24 +55,35 @@ connection = None
 crafting = False
 
 
-def die():
+def die(player):
+
+    print("Player " + player + " died")
+
     global px, py, pxv, pyv
     global pi, blocks
 
     px = 0
     py = 0
 
-    for b in blocks:
-        if blocks[b]['solid']:
-            pi[b] = 0
+    if not keepInv:
+        for b in blocks:
+            if blocks[b]['solid']:
+                pi[b] = 0
+
+
+def appendChatMessage(message, y):
+    screen.blit(font.render(message, True, (255, 255, 255)), (5, y))
 
 
 font = pygame.font.SysFont('ubuntu', int(size / 1.1))
+
 run = True
 clock = pygame.time.Clock()
+
 screen = pygame.display.set_mode((size * 40, size * 40 + size * 2))
 pygame.display.set_caption('Mine and Craft game ' + VERSION)
 pre_mouse_press = [False] * 5
+
 while run:
     clock.tick(60)
     dt = 60 / max(clock.get_fps(), 0.001)  # delta time
@@ -136,20 +154,32 @@ while run:
                         connection = net.server(world)
 
                 if creative:  # debug and cheats
-                    if c[0] == '/kill':
-                        die()
+                    if c[0] == '/gamerule':
+                        if len(c) >= 2:
+                            if c[1] == 'keepInventory' or 'keepInv':
+                                keepInv = not keepInv
+                                print("Changed gamemode keepInventory to " + str(keepInv).lower())
+                    elif c[0] == '/kill':
+                        die(username)
+                        print("Commited suicide")
                     elif c[0] == '/give':
                         if len(c) == 3:
                             if c[1] in blocks:
                                 pi[c[1]] += int(c[2])
+                                print("Gave " + str(int(c[2])) + " blocks of " + str(c[1]) + " to player " + username)
                     elif c[0] == '/tp':
                         if len(c) == 2:
                             px = float(c[1])
                             py = 39 - world.gen.gen(int(px)) - 40
+                            print("Teleported " + username + " to " + str(px) + ", " + str(py))
                     elif c[0] == '/set':
                         if len(c) == 4:
                             world.set(int(c[1]), int(c[2]),
                                       block.block(c[3], blocks))
+                            print("Set block " + str(int(c[1])) + " " + str(int(c[2])) + " to " + str(c[3]))
+                    elif c[0] == '/fly':
+                        fly = not fly
+                        print("Set fly ability to " + str(fly).lower())
 
                 prompt_text = ''
                 debug['prompt'] = False
@@ -162,15 +192,39 @@ while run:
     mouse_click = [mouse_press[i] and not pre_mouse_press[i] for i in range(5)]
     pre_mouse_press = mouse_press
 
+    # key checks
     if server or not online or True:
-        if key[pygame.K_d] or key[pygame.K_RIGHT]:
-            pxv += .1
-        if key[pygame.K_a] or key[pygame.K_LEFT]:
-            pxv -= .1
+        if not fly:
+            if key[pygame.K_d] or key[pygame.K_RIGHT]:
+                pxv += .1
 
-        if key[pygame.K_w] or key[pygame.K_UP]:
-            if pf:
-                pyv = -.55
+            if key[pygame.K_a] or key[pygame.K_LEFT]:
+                pxv -= .1
+
+            if key[pygame.K_w] or key[pygame.K_UP]:
+                if pf:
+                    pyv = -.55
+        else:  # TODO: fix random velocity bugging in creative
+            if key[pygame.K_d] or key[pygame.K_RIGHT]:
+                pxv += .05
+            elif pxv > 0:
+                pxv -= .05
+
+            if key[pygame.K_a] or key[pygame.K_LEFT]:
+                pxv -= .05
+            elif pxv < 0:
+                pxv += .05
+
+            if key[pygame.K_s] or key[pygame.K_DOWN]:
+                pyv += .05
+            elif pyv > 0:
+                pyv -= .05
+
+            if key[pygame.K_w] or key[pygame.K_UP]:
+                pyv -= .05
+            elif pyv < 0:
+                pyv += .05
+
     elif server and online:
         pass
 
@@ -198,38 +252,46 @@ while run:
                     if mouse_pos[1] < size * 40:
                         pi[ps] -= 1
 
-    # player physics
+    # player physics, x
     px += pxv
-    while world.get(math.ceil(px) + 20, math.floor(py) + 1).solid:
-        px -= .01
-        pxv = 0
-    while world.get(math.floor(px) + 20, math.floor(py) + 1).solid:
-        px += .01
-        pxv = 0
-    pxv /= 2
 
-    pf = False
-    pyv += .1
+    if not fly:  # check for creative mode to fly
+        while world.get(math.ceil(px) + 20, math.floor(py) + 1).solid:
+            px -= .01
+            pxv = 0
+        while world.get(math.floor(px) + 20, math.floor(py) + 1).solid:
+            px += .01
+            pxv = 0
+        pxv /= 2
 
-    for i in range(10):
-        py += pyv / 10
+        pf = False
+        pyv += .1
 
-        if world.get(math.floor(px) + 20, math.floor(py) + 1).solid or world.get(math.ceil(px) + 20, math.floor(py) + 1).solid:
+        for i in range(10):
+            py += pyv / 10
+
+            if world.get(math.floor(px) + 20, math.floor(py) + 1).solid or world.get(math.ceil(px) + 20,
+                                                                                     math.floor(py) + 1).solid:
+                pyv = 0
+                break
+
+        while world.get(math.floor(px) + 20, math.floor(py) + 1).solid or world.get(math.ceil(px) + 20,
+                                                                                    math.floor(py) + 1).solid:
             pyv = 0
-            break
+            py -= .01
+            pf = True
 
-    while world.get(math.floor(px) + 20, math.floor(py) + 1).solid or world.get(math.ceil(px) + 20, math.floor(py) + 1).solid:
-        pyv = 0
-        py -= .01
-        pf = True
+        hit = False
 
-    hit = False
-    while world.get(math.floor(px) + 20, math.floor(py) - 0).solid or world.get(math.ceil(px) + 20, math.floor(py)).solid:
-        pyv = 0
-        py += .01
-        hit = True
-    if hit:
-        py -= .01
+        while world.get(math.floor(px) + 20, math.floor(py) - 0).solid or world.get(math.ceil(px) + 20,
+                                                                                    math.floor(py)).solid:
+            pyv = 0
+            py += .01
+            hit = True
+        if hit:
+            py -= .01
+    else:  # fly part
+        py += pyv
 
     if online and not server:
         px, py = connection.update(key, world)
@@ -238,21 +300,23 @@ while run:
         connection.update(world)
 
     if py > 60:
-        die()
+        die(username)
 
     for y in range(41):
         for x in range(41):
             b = world.get(x + math.floor(px), y + math.floor(py) - 20)
             if b is not None:
                 if b.render:
-                    pygame.draw.rect(screen, b.color, (round((x - px % 1) * size), round((y - py % 1) * size), size, size))
+                    pygame.draw.rect(screen, b.color,
+                                     (round((x - px % 1) * size), round((y - py % 1) * size), size, size))
                     if debug['block_stress']:
                         screen.blit(font.render(str(b.support), True, (100, 0, 0)),
                                     (round((x - px % 1) * size), round((y - py % 1) * size)))
 
                 if debug['block_update']:
                     if b in world.to_update:
-                        pygame.draw.rect(screen, (255, 0, 0), (round((x - px % 1) * size), round((y - py % 1) * size), size, size), 2)
+                        pygame.draw.rect(screen, (255, 0, 0),
+                                         (round((x - px % 1) * size), round((y - py % 1) * size), size, size), 2)
 
             if debug['chunk_border']:
                 if y == 0 and (int(px) - x) % 40 == 0:  # draw chunk borders
@@ -269,7 +333,8 @@ while run:
             pygame.draw.rect(screen, (255, 0, 0), (round((p.x - px) * size), round((p.y - py + 20) * size), size, size))
 
     if len(world.to_update) > 100 or debug['to_update']:
-        screen.blit(font.render('processing ' + str(len(world.to_update)), True, (255, 255, 255)), (10, 10 + 75 * debug['player_info']))
+        screen.blit(font.render('processing ' + str(len(world.to_update)), True, (255, 255, 255)),
+                    (10, 10 + 75 * debug['player_info']))
 
     # inventory ui, will not be drawn if debug menu or chat is active
     pygame.draw.rect(screen, (0, 0, 0), (0, size * 40, size * 40, size * 2))  # black background
@@ -288,7 +353,8 @@ while run:
 
                 if size * 40 < mouse_pos[1] < size * 41:
                     if i * size < mouse_pos[0] < (i + 1) * size:
-                        pygame.draw.rect(screen, ((255 - c[0]) % 255, (255 - c[1]) % 255, (255 - c[2]) % 255), (i * size, size * 40, size, size), 2)
+                        pygame.draw.rect(screen, ((255 - c[0]) % 255, (255 - c[1]) % 255, (255 - c[2]) % 255),
+                                         (i * size, size * 40, size, size), 2)
 
                         if mouse_press[0]:
                             ps = b
@@ -345,17 +411,19 @@ while run:
         screen.blit(font.render(f'Motion: {round(pxv, 4)} {round(pyv, 3)}', True, (255, 255, 255)), (10, 25))
         screen.blit(font.render(f'onGround: {pf}', True, (255, 255, 255)), (10, 55))
 
+    # chat
     if debug['prompt']:
         if pygame.time.get_ticks() // 200 % 2 == 0:
             text = str(prompt_text)
         else:
             text = str(prompt_text) + '_'
-        screen.blit(font.render(text, True, (255, 255, 255), (0, 0, 0)), (10, size * 40))
+        screen.blit(font.render("> " + text, True, (255, 255, 255), (0, 0, 0)), (5, size * 40))
 
-        y = size * 39
-        for text in prompt_history:
-            screen.blit(font.render(text, True, (255, 255, 255), (0, 0, 0)), (10, y))
-            y -= size
+    # always display
+    y = size * 39 - 5
+    for text in prompt_history:
+        appendChatMessage(text, y)
+        y -= size
 
     if kmod & pygame.KMOD_LCTRL:  # debug menu
         i = 0
@@ -383,5 +451,6 @@ while run:
 
 pygame.quit()
 world.save()
+
 if connection is not None:
     connection.exit()
