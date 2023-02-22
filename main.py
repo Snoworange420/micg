@@ -4,14 +4,16 @@ import block
 import noise
 import math
 import net
+import player
+import logger
 
 pygame.init()
 
 # hold control for debug menu
-VERSION = 'Alpha 6.9'
+VERSION = 'Alpha 6.1'
 size = 16
 creative = True
-username = 'ExampleUserLol'
+username = 'Player'
 
 gen = noise.generator(10)
 world = noise.world(gen)
@@ -29,6 +31,8 @@ ps = 'grass'  # player block selection
 
 pi = {}  # player inventory
 keepInv = False  # keep inventory
+
+player.loadConfig()
 
 for b in blocks:
     if blocks[b]['solid']:
@@ -71,9 +75,15 @@ def die(player):
 
 def addChatMessageDirectly(message):
     prompt_history.insert(0, message)
+    logger.log("[Micg] [CHAT] " + message)
+    
+def addErrorMessageDirectly(message):
+    prompt_history.insert(0, "<err>" + message + "<\\err>")
+    logger.log("[Micg] [ERROR] " + message)
 
 def sendChatMessageAsPlayer(username, message):
     prompt_history.insert(0, username + ': ' + message)
+    logger.log("[Micg] [CHAT] <" + username + "> " + message)
 
 
 font = pygame.font.SysFont('ubuntu', int(size / 1.1))
@@ -84,6 +94,10 @@ clock = pygame.time.Clock()
 screen = pygame.display.set_mode((size * 40, size * 40 + size * 2))
 pygame.display.set_caption('Mine and Craft game ' + VERSION)
 pre_mouse_press = [False] * 5
+
+logger.resetLog()
+
+print("Game initialized")
 
 while run:
     clock.tick(60)
@@ -109,9 +123,12 @@ while run:
                 prompt_text = ''
                 debug['prompt'] = False
             else:
+                
                 c = prompt_text.split(' ')
                 # saving and loading
-                if c[0] == '/load':
+                if c[0] == '/quit' or c[0] == '/exit':
+                        run = False
+                elif c[0] == '/load':
                     if len(c) == 1:
                         world.load()
                     elif len(c) == 2:
@@ -158,10 +175,12 @@ while run:
 
                 if creative:  # debug and cheats
                     if c[0] == '/gamerule':
-                        if len(c) >= 2:
-                            if c[1] == 'keepInventory' or 'keepInv':
+                        if len(c) >= 2 and type(c[1]) == str:
+                            if c[1] == 'keepInventory' or c[1] == 'keepInv':
                                 keepInv = not keepInv
                                 addChatMessageDirectly("Changed gamemode keepInventory to " + str(keepInv).lower())
+                            else:
+                                addErrorMessageDirectly("Unknown gamerule: " + c[1])
                     elif c[0] == '/kill':
                         die(username)
                         addChatMessageDirectly("Commited suicide")
@@ -171,7 +190,7 @@ while run:
                                 pi[c[1]] += int(c[2])
                                 addChatMessageDirectly("Gave " + str(int(c[2])) + " blocks of " + str(c[1]) + " to player " + username)
                     elif c[0] == '/tp':
-                        if len(c) == 2:
+                        if len(c) == 2 and c[1].isdigit():
                             px = float(c[1])
                             py = 39 - world.gen.gen(int(px)) - 40
                             addChatMessageDirectly("Teleported " + username + " to " + str(px) + ", " + str(py))
@@ -184,27 +203,28 @@ while run:
                         fly = not fly
                         addChatMessageDirectly("Set fly ability to " + str(fly).lower())
                     elif c[0] == '/locate':
-                        m = 5000
-                        if len(c) == 3:
-                            m = 100000
-                        if len(c) == 2 or len(c) == 3:
-                            found = False
-                            i = 0
-                            while not found:
-                                value = world.gen.gen(i)
-                                if i % 100 == 0:
-                                    print(('#' * value) + (' ' * (int(c[1]) - value)) + '|')
-                                if value >= int(c[1]):
-                                    print(('#' * value) + (' ' * (int(c[1]) - value)) + '|')
-                                    found = True
-                                if i > m:
-                                    addChatMessageDirectly("Could not find")
-                                    print('could not find')
-                                    break
-                                i += 1
-                            if found:
-                                px = i
-                                py = -(world.gen.gen(i))
+                        if c[1].isdigit():
+                            m = 5000
+                            if len(c) == 3:
+                                m = 100000
+                            if len(c) == 2 or len(c) == 3:
+                                found = False
+                                i = 0
+                                while not found:
+                                    value = world.gen.gen(i)
+                                    if i % 100 == 0:
+                                        print(('#' * value) + (' ' * (int(c[1]) - value)) + '|')
+                                    if value >= int(c[1]):
+                                        print(('#' * value) + (' ' * (int(c[1]) - value)) + '|')
+                                        found = True
+                                    if i > m:
+                                        addChatMessageDirectly("Could not find")
+                                        print('could not find')
+                                        break
+                                    i += 1
+                                if found:
+                                    px = i
+                                    py = -(world.gen.gen(i))
                         elif len(c) == 1:
                             m = 0
                             i = 0
@@ -453,10 +473,13 @@ while run:
             text = str(prompt_text) + '_'
         screen.blit(font.render("> " + text, True, (255, 255, 255), (0, 0, 0)), (5, size * 40))
 
-    # always display
+    # always display chat
     y = size * 39 - 5
     for text in prompt_history:
-        screen.blit(font.render(text, True, (255, 255, 255)), (5, y))
+        if (text.startswith("<err>") and text.endswith("<\\err>")):
+            screen.blit(font.render(text.replace("<err>", "").replace("<\\err>", ""), True, (255, 0, 0)), (5, y))
+        else:
+            screen.blit(font.render(text, True, (255, 255, 255)), (5, y))
         y -= size
 
     if kmod & pygame.KMOD_LCTRL:  # debug menu
@@ -484,6 +507,7 @@ while run:
     pygame.display.update()
 
 pygame.quit()
+player.saveConfig(username)
 world.save()
 
 if connection is not None:
