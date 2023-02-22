@@ -8,7 +8,6 @@ def saveConfig(username):
     if filename not in os.listdir('.'):
         with open(filename, 'w') as file:
             json.dump({}, file)
-            return
 
 
     with open(filename, 'w') as file:

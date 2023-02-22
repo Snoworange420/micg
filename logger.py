@@ -1,9 +1,13 @@
+import pygame
 import os
+from time import gmtime, strftime
 
 def log(message):
-    print(message)
+
+    print("[" + strftime("%H:%M:%S", gmtime()) + " / " + str(pygame.time.get_ticks()) + "] " + message)
+
     with open('latest.log', 'a', encoding="UTF-8") as f:
-        f.write(message + "\n")
+        f.write("[" + strftime("%H:%M:%S", gmtime()) + " / " + str(pygame.time.get_ticks()) + "] " + message + "\n")
     
 def resetLog():
     if "latest.log" not in os.listdir('.'):

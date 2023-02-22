@@ -10,7 +10,7 @@ import logger
 pygame.init()
 
 # hold control for debug menu
-VERSION = 'Alpha 6.1'
+VERSION = 'Alpha 6.2'
 size = 16
 creative = True
 username = 'Player'
