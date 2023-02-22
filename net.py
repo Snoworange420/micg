@@ -5,6 +5,8 @@ import pygame.constants
 import math
 import time
 
+import block
+
 
 class net:
     def __init__(self, s: socket.socket):
@@ -57,6 +59,22 @@ class net:
 # wasd changed
 # 0000 binary for wasd
 
+# AP:
+# x y type
+# place block, also for deleting block since you're basically placing air
+
+# AM:
+# x y
+
+# IM:
+# x y name
+# sent from server_client to client to let client know about other clients moving
+# maybe this could be used as AM
+
+# IQ: (not implemented yet)
+# name
+# let other clients know about other clients disconnecting
+
 # AQ:
 # quit
 
@@ -73,6 +91,8 @@ class player:
 
         self.queue = []  # placing/breaking blocks
         self.key = [False, False, False, False]  # up, left, down, right
+
+        self.name = None
 
     def physics(self, world):
         if self.key[3]:
@@ -104,6 +124,7 @@ class server:
         self.world = world
 
         self.players = []
+        self.pipes = []
 
         self.ip = ip
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -122,7 +143,9 @@ class server:
                 print('accepted', c, address)
                 p = player()
                 self.players.append(p)
-                self.threads.append(threading.Thread(target=server_client, args=[c, self, p]))
+                pi = pipe()
+                self.pipes.append(pi)
+                self.threads.append(threading.Thread(target=server_client, args=[c, self, p, pi]))
                 self.threads[-1].start()
             except socket.timeout:
                 pass
@@ -142,14 +165,24 @@ class server:
     def remove(self, s_c):
         self.players.remove(s_c.player)
 
+    def send_all(self, data):
+        for p in self.pipes:
+            p.send(data)
+
+    def send_all_except(self, data, exception):  # TODO: broken
+        for p in self.pipes:
+            if p != exception:
+                p.send(data)
+
 
 class server_client:
-    def __init__(self, c: socket.socket, s: server, p: player):
+    def __init__(self, c: socket.socket, s: server, p: player, pi):
         self.c = c
         self.s = s
-        self.r = True
+        self.r = True  # TODO: what is 'r'
         self.name = 'NAME_NOT_SENT'
         self.player = p
+        self.pipe = pi
         self.net = net(c)
 
         self.world = self.s.world
@@ -163,16 +196,20 @@ class server_client:
         print("client: '" + self.name + "' packet: '" + data + "'")
         if data[0] == 'I':
             if data[1] == 'N':
+                had_name = self.name != 'NAME_NOT_SENT'
                 if ' ' not in data[2:]:
                     self.name = data[2:]
                 else:
                     print('incorrect name', data[2:])
                     if self.r:
                         self.net.send('EN')
+                if not had_name:
+                    # let all the other clients that are not this client know that this client exists
+                    self.s.send_all_except('IN' + self.name, self.pipe)
                 print(self.name, 'joined')
             elif data[1] == 'B':
                 split = data[2:].split(' ')
-                print('block info', split)
+                print('block info', split, 'deprecated')
                 if self.world is not None:
                     if len(split) == 2:
                         x = int(split[0])
@@ -183,12 +220,12 @@ class server_client:
                     else:
                         raise ValueError(data)
                 else:
-                    raise Exception('server_client.world is None')
+                    raise ValueError('server_client.world is None')
             elif data[1] == 'C':
                 split = data[2:].split(' ')
                 if len(split) == 2:
                     c = self.world.serialize_chunk(int(split[0]), int(split[1]))
-                    print('IC' + split[0] + ' ' + split[1] + ' ' + c[:50])
+                    # print('IC' + split[0] + ' ' + split[1] + ' ' + c[:50])
                     self.net.send('IC' + split[0] + ' ' + split[1] + ' ' + c)
             else:
                 print('unknown info packet:', data)
@@ -196,6 +233,16 @@ class server_client:
             if data[1] == 'K':
                 for i in range(4):
                     self.player.key[i] = data[i + 2] == '1'
+
+            elif data[1] == 'P':
+                split = data[2:].split(' ')
+                if len(split) != 3:
+                    return
+
+                self.world.set(int(split[0]), int(split[1]), block.block(split[2], self.world.blocks))
+                self.s.send_all(data)  # let all the other clients know,
+                # will cause the packet to be sent back to the client that sent it
+
             elif data[1] == 'Q':
                 self.close()
             else:
@@ -212,10 +259,20 @@ class server_client:
             except socket.timeout:
                 pass
 
+            data = self.pipe.recv()
+            if data is not None:
+                for packet in data:
+                    # if data[:2] == 'AP':
+                    self.net.send(packet)
+                    data = self.pipe.recv()
+
             if self.r:
                 if self.player.xv != 0 or self.player.yv != 0:
                     packet = 'AM' + str(self.player.x) + ' ' + str(self.player.y)
                     self.net.send(packet)
+
+                    packet = 'IM' + str(self.player.x) + ' ' + str(self.player.y) + ' ' + self.name
+                    self.s.send_all(packet)
 
     def close(self):
         self.c.close()
@@ -233,6 +290,7 @@ class client:
         self.chunk_requests = {}  # chunks for which requests have been sent to the server
 
         self.name = 'test'
+        self.players = {}
 
         self.connected = False
 
@@ -311,6 +369,13 @@ class client:
                             print(error)
                             self.x = x  # reset position to before packet to not only update x in error
                             self.y = y
+                elif data[1] == 'P':
+                    split = data[2:].split(' ')
+                    if len(split) == 3:
+                        self.world.set(int(split[0]), int(split[1]), block.block(split[2], self.world.blocks),
+                                       update=False)
+                    else:
+                        print('incorrect packet')  # TODO: keep track of amount of incorrect packets
                 else:
                     print('incorrect action packet:', data)
 
@@ -319,6 +384,20 @@ class client:
                     split = data[2:].split(' ')
                     self.world.deserialise_chunk(data[2:-1])
                     self.chunk_requests[(int(split[0]), int(split[1]))] = True
+                elif data[1] == 'N':
+                    if data[2:] not in self.players:
+                        self.players[data[2:]] = player()
+                        print(f'player {data[2:]} joined')
+                    else:
+                        print(f'player {data[2:]} joined multiple times')  # TODO: let clients know about other clients disconnecting
+                elif data[1] == 'M':
+                    split = data[2:].split(' ')
+                    name = split[2]
+                    if name in self.players:
+                        self.players[name].x = float(split[0])
+                        self.players[name].y = float(split[1])
+                    else:
+                        print(f"player '{name}' moved but does not exist")
                 else:
                     print('incorrect information packet type:', data)
 
@@ -343,6 +422,9 @@ class client:
                     self.chunk_requests[(x, y)] = True
                     t = 0
 
+    def set_block(self, x, y, value):
+        self.net.send('AP' + str(x) + ' ' + str(y) + ' ' + value.name)
+
     def exit(self):
         self.net.send('AQ')
         self.connected = False
@@ -359,3 +441,19 @@ class client:
             print('recv_thread lives on')
 
         self.server.close()
+
+
+class pipe:
+    def __init__(self):
+        self.data = []
+
+    def recv(self):
+        if not self.data:
+            ret = None
+        else:
+            ret = self.data
+            self.data = []
+        return ret
+
+    def send(self, data):
+        self.data.append(data)
