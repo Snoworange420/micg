@@ -29,4 +29,4 @@ python 3.* and pygame 2.* should be fine (no guarantees)
 
 ## Disclaimer
 
-Mine and craft game is NOT related to any other sqaure sandbox games (e.g. Minesweeper, 2048, Super Mario Bros.)
+Mine and Craft game is NOT related to any other sqaure sandbox games (e.g. Minesweeper, 2048, Super Mario Bros.)
